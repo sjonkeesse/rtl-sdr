@@ -343,3 +343,39 @@ int fc0012_set_gain(void *dev, int gain)
 
 	return ret;
 }
+
+int fc0012_set_manual_gain(void *dev, uint8_t manual)
+{
+	uint8_t tmp_agc = 0;
+
+	int ret = fc0012_readreg(dev, 0x13, &tmp_agc);
+	if (!ret) {
+		return ret;
+	}
+
+	printf("FC0012_ManualGain: %i\n", manual);
+	if (manual) {
+		tmp_agc &= 0xef;
+		ret = fc0012_writereg(dev, 0x0c, tmp_agc);
+		if (ret) {
+			return ret;
+		}
+
+		return 0;
+	}
+
+	tmp_agc |= 0x10;
+	ret = fc0012_writereg(dev, 0x12, 0x1F);
+	if (ret)
+		return ret;
+
+	ret = fc0012_writereg(dev, 0x13, 0x08);
+	if (ret)
+		return ret;
+
+	ret = fc0012_writereg(dev, 0x0c, tmp_agc);
+	if (ret)
+		return ret;
+
+	return 0;
+}

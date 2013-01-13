@@ -190,7 +190,9 @@ int fc0012_set_freq(void *dev, uint32_t freq) {
 }
 int fc0012_set_bw(void *dev, int bw) { return 0; }
 int _fc0012_set_gain(void *dev, int gain) { return fc0012_set_gain(dev, gain); }
-int fc0012_set_gain_mode(void *dev, int manual) { return 0; }
+int fc0012_set_gain_mode(void *dev, int manual) {
+    return fc0012_set_manual_gain(dev, manual);
+}
 
 int _fc0013_init(void *dev) { return fc0013_init(dev); }
 int fc0013_exit(void *dev) { return 0; }
