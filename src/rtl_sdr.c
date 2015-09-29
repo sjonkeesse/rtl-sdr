@@ -80,11 +80,11 @@ static void sighandler(int signum)
 }
 #endif
 
-static void rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
+static int rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
 {
 	if (ctx) {
 		if (do_exit)
-			return;
+			return 0;
 
 		if ((bytes_to_read > 0) && (bytes_to_read < len)) {
 			len = bytes_to_read;
@@ -100,6 +100,8 @@ static void rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
 		if (bytes_to_read > 0)
 			bytes_to_read -= len;
 	}
+
+    return 0;
 }
 
 int main(int argc, char **argv)

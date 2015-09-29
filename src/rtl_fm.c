@@ -777,16 +777,16 @@ void full_demod(struct demod_state *d)
 	}
 }
 
-static void rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
+static int rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
 {
 	int i;
 	struct dongle_state *s = ctx;
 	struct demod_state *d = s->demod_target;
 
 	if (do_exit) {
-		return;}
+		return 0;}
 	if (!ctx) {
-		return;}
+		return 0;}
 	if (s->mute) {
 		for (i=0; i<s->mute; i++) {
 			buf[i] = 127;}
@@ -801,6 +801,8 @@ static void rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
 	d->lp_len = len;
 	pthread_rwlock_unlock(&d->rw);
 	safe_cond_signal(&d->ready, &d->ready_m);
+
+	return 0;
 }
 
 static void *dongle_thread_fn(void *arg)
