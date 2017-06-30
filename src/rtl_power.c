@@ -44,6 +44,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <sys/time.h>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -115,57 +116,59 @@ int tune_count = 0;
 int boxcar = 1;
 int comp_fir_size = 0;
 int peak_hold = 0;
+int no_interval = 0;
 
 void usage(void)
 {
-	fprintf(stderr,
-		"rtl_power, a simple FFT logger for RTL2832 based DVB-T receivers\n\n"
-		"Use:\trtl_power -f freq_range [-options] [filename]\n"
-		"\t-f lower:upper:bin_size [Hz]\n"
-		"\t (bin size is a maximum, smaller more convenient bins\n"
-		"\t  will be used.  valid range 1Hz - 2.8MHz)\n"
-		"\t[-i integration_interval (default: 10 seconds)]\n"
-		"\t (buggy if a full sweep takes longer than the interval)\n"
-		"\t[-1 enables single-shot mode (default: off)]\n"
-		"\t[-e exit_timer (default: off/0)]\n"
-		//"\t[-s avg/iir smoothing (default: avg)]\n"
-		//"\t[-t threads (default: 1)]\n"
-		"\t[-d device_index (default: 0)]\n"
-		"\t[-g tuner_gain (default: automatic)]\n"
-		"\t[-p ppm_error (default: 0)]\n"
-		"\tfilename (a '-' dumps samples to stdout)\n"
-		"\t (omitting the filename also uses stdout)\n"
-		"\n"
-		"Experimental options:\n"
-		"\t[-w window (default: rectangle)]\n"
-		"\t (hamming, blackman, blackman-harris, hann-poisson, bartlett, youssef)\n"
-		// kaiser
-		"\t[-c crop_percent (default: 0%%, recommended: 20%%-50%%)]\n"
-		"\t (discards data at the edges, 100%% discards everything)\n"
-		"\t (has no effect for bins larger than 1MHz)\n"
-		"\t[-F fir_size (default: disabled)]\n"
-		"\t (enables low-leakage downsample filter,\n"
-		"\t  fir_size can be 0 or 9.  0 has bad roll off,\n"
-		"\t  try with '-c 50%%')\n"
-		"\t[-P enables peak hold (default: off)]\n"
-		"\t[-D enable direct sampling (default: off)]\n"
-		"\t[-O enable offset tuning (default: off)]\n"
-		"\n"
-		"CSV FFT output columns:\n"
-		"\tdate, time, Hz low, Hz high, Hz step, samples, dbm, dbm, ...\n\n"
-		"Examples:\n"
-		"\trtl_power -f 88M:108M:125k fm_stations.csv\n"
-		"\t (creates 160 bins across the FM band,\n"
-		"\t  individual stations should be visible)\n"
-		"\trtl_power -f 100M:1G:1M -i 5m -1 survey.csv\n"
-		"\t (a five minute low res scan of nearly everything)\n"
-		"\trtl_power -f ... -i 15m -1 log.csv\n"
-		"\t (integrate for 15 minutes and exit afterwards)\n"
-		"\trtl_power -f ... -e 1h | gzip > log.csv.gz\n"
-		"\t (collect data for one hour and compress it on the fly)\n\n"
-		"Convert CSV to a waterfall graphic with:\n"
-		"\t http://kmkeen.com/tmp/heatmap.py.txt \n");
-	exit(1);
+    fprintf(stderr,
+            "rtl_power, a simple FFT logger for RTL2832 based DVB-T receivers\n\n"
+                    "Use:\trtl_power -f freq_range [-options] [filename]\n"
+                    "\t-f lower:upper:bin_size [Hz]\n"
+                    "\t (bin size is a maximum, smaller more convenient bins\n"
+                    "\t  will be used.  valid range 1Hz - 2.8MHz)\n"
+                    "\t[-i integration_interval (default: 10 seconds)]\n"
+                    "\t (buggy if a full sweep takes longer than the interval)\n"
+                    "\t[-n no interval, output directly with milliseconds]\n"
+                    "\t[-1 enables single-shot mode (default: off)]\n"
+                    "\t[-e exit_timer (default: off/0)]\n"
+                    //"\t[-s avg/iir smoothing (default: avg)]\n"
+                    //"\t[-t threads (default: 1)]\n"
+                    "\t[-d device_index (default: 0)]\n"
+                    "\t[-g tuner_gain (default: automatic)]\n"
+                    "\t[-p ppm_error (default: 0)]\n"
+                    "\tfilename (a '-' dumps samples to stdout)\n"
+                    "\t (omitting the filename also uses stdout)\n"
+                    "\n"
+                    "Experimental options:\n"
+                    "\t[-w window (default: rectangle)]\n"
+                    "\t (hamming, blackman, blackman-harris, hann-poisson, bartlett, youssef)\n"
+                    // kaiser
+                    "\t[-c crop_percent (default: 0%%, recommended: 20%%-50%%)]\n"
+                    "\t (discards data at the edges, 100%% discards everything)\n"
+                    "\t (has no effect for bins larger than 1MHz)\n"
+                    "\t[-F fir_size (default: disabled)]\n"
+                    "\t (enables low-leakage downsample filter,\n"
+                    "\t  fir_size can be 0 or 9.  0 has bad roll off,\n"
+                    "\t  try with '-c 50%%')\n"
+                    "\t[-P enables peak hold (default: off)]\n"
+                    "\t[-D enable direct sampling (default: off)]\n"
+                    "\t[-O enable offset tuning (default: off)]\n"
+                    "\n"
+                    "CSV FFT output columns:\n"
+                    "\tdate, time, Hz low, Hz high, Hz step, samples, dbm, dbm, ...\n\n"
+                    "Examples:\n"
+                    "\trtl_power -f 88M:108M:125k fm_stations.csv\n"
+                    "\t (creates 160 bins across the FM band,\n"
+                    "\t  individual stations should be visible)\n"
+                    "\trtl_power -f 100M:1G:1M -i 5m -1 survey.csv\n"
+                    "\t (a five minute low res scan of nearly everything)\n"
+                    "\trtl_power -f ... -i 15m -1 log.csv\n"
+                    "\t (integrate for 15 minutes and exit afterwards)\n"
+                    "\trtl_power -f ... -e 1h | gzip > log.csv.gz\n"
+                    "\t (collect data for one hour and compress it on the fly)\n\n"
+                    "Convert CSV to a waterfall graphic with:\n"
+                    "\t http://kmkeen.com/tmp/heatmap.py.txt \n");
+    exit(1);
 }
 
 void multi_bail(void)
@@ -517,6 +520,7 @@ void frequency_range(char *arg, double crop)
 		ts->buf_len = buf_len;
 	}
 	/* report */
+	fprintf(stderr, "NUMBER OF FREQUENCY HOPS: %i\n", tune_count);
 	fprintf(stderr, "Number of frequency hops: %i\n", tune_count);
 	fprintf(stderr, "Dongle bandwidth: %iHz\n", bw_used);
 	fprintf(stderr, "Downsampling by: %ix\n", downsample);
@@ -776,12 +780,14 @@ int main(int argc, char **argv)
 	time_t next_tick;
 	time_t time_now;
 	time_t exit_time = 0;
+	int millisec;			// For using ms
+	struct timeval tv;		// For using ms
 	char t_str[50];
 	struct tm *cal_time;
 	double (*window_fn)(int, int) = rectangle;
 	freq_optarg = "";
 
-	while ((opt = getopt(argc, argv, "f:i:s:t:d:g:p:e:w:c:F:1PDOh")) != -1) {
+	while ((opt = getopt(argc, argv, "f:i:s:t:d:g:p:e:w:c:F:1PDOhn")) != -1) {
 		switch (opt) {
 		case 'f': // lower:upper:bin_size
 			freq_optarg = strdup(optarg);
@@ -849,6 +855,10 @@ int main(int argc, char **argv)
 			boxcar = 0;
 			comp_fir_size = atoi(optarg);
 			break;
+        case 'n':
+            // Do not use periodic outputs
+            no_interval = 1;
+            break;
 		case 'h':
 		default:
 			usage();
@@ -880,7 +890,11 @@ int main(int argc, char **argv)
 	if (interval < 1) {
 		interval = 1;}
 
-	fprintf(stderr, "Reporting every %i seconds\n", interval);
+    if (no_interval) {
+        fprintf(stderr, "Reporting: directly\n");
+    } else {
+        fprintf(stderr, "Reporting every %i seconds\n", interval);
+    }
 
 	if (!dev_given) {
 		dev_index = verbose_device_search("0");
@@ -957,15 +971,34 @@ int main(int argc, char **argv)
 	while (!do_exit) {
 		scanner();
 		time_now = time(NULL);
-		if (time_now < next_tick) {
+		if (time_now < next_tick && !no_interval) {
 			continue;}
 		// time, Hz low, Hz high, Hz step, samples, dbm, dbm, ...
-		cal_time = localtime(&time_now);
-		strftime(t_str, 50, "%Y-%m-%d, %H:%M:%S", cal_time);
+
+        // Get Date, hours, minutes and seconds
+        cal_time = localtime(&time_now);
+
+        strftime(t_str, 50, "%Y-%m-%d, %H:%M:%S", cal_time);
+
 		for (i=0; i<tune_count; i++) {
-			fprintf(file, "%s, ", t_str);
+            if (no_interval) {
+                // Get milliseconds in the for loop because it changes every loop
+                gettimeofday(&tv, NULL);
+                millisec = lrint(tv.tv_usec/1000.0);
+                // Sometimes it get to a thousand, but the second is not passed yet...
+                if (millisec>=1000) {
+                    millisec = 999;
+                    tv.tv_sec++;
+                }
+
+                fprintf(file, "%s.%03d, ", t_str, millisec);
+            } else {
+                fprintf(file, "%s, ", t_str);
+            }
+
 			csv_dbm(&tunes[i]);
 		}
+
 		fflush(file);
 		while (time(NULL) >= next_tick) {
 			next_tick += interval;}
