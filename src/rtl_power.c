@@ -741,7 +741,11 @@ void csv_dbm(struct tuning_state *ts)
 	for (i=i1; i<=i2; i++) {
 		dbm  = (double)ts->avg[i];
 		dbm /= (double)ts->rate;
-		dbm /= (double)ts->samples;
+
+        if (0 == peak_hold) {
+            dbm /= (double) ts->samples;
+        }
+
 		dbm  = 10 * log10(dbm);
 		fprintf(file, "%.2f, ", dbm);
 	}
