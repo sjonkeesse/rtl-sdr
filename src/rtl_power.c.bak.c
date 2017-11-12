@@ -46,19 +46,19 @@
 #include <time.h>
 #include <sys/time.h>
 
-//#ifndef _WIN32
+#ifndef _WIN32
 #include <unistd.h>
-//#else
-//#include <windows.h>
-//#include <fcntl.h>
-//#include <io.h>
-//#include "getopt/getopt.h"
-//#define usleep(x) Sleep(x/1000)
-//#if defined(_MSC_VER) && (_MSC_VER < 1800)
-//#define round(x) (x > 0.0 ? floor(x + 0.5): ceil(x - 0.5))
-//#endif
-//#define _USE_MATH_DEFINES
-//#endif
+#else
+#include <windows.h>
+#include <fcntl.h>
+#include <io.h>
+#include "getopt/getopt.h"
+#define usleep(x) Sleep(x/1000)
+#if defined(_MSC_VER) && (_MSC_VER < 1800)
+#define round(x) (x > 0.0 ? floor(x + 0.5): ceil(x - 0.5))
+#endif
+#define _USE_MATH_DEFINES
+#endif
 
 #include <math.h>
 #include <pthread.h>
@@ -69,9 +69,9 @@
 
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 
-#define DEFAULT_BUF_LENGTH      (1 * 16384)
-#define AUTO_GAIN               -100
-#define BUFFER_DUMP             (1<<12)
+#define DEFAULT_BUF_LENGTH		(1 * 16384)
+#define AUTO_GAIN			-100
+#define BUFFER_DUMP			(1<<12)
 
 #define MAXIMUM_RATE			2800000
 #define MINIMUM_RATE			1000000
@@ -87,10 +87,8 @@ int next_power;
 int16_t *fft_buf;
 int *window_coefs;
 
-/**
- * This holds the configuration of each tuning range
- */
 struct tuning_state
+/* one per tuning range */
 {
 	int freq;
 	int rate;
@@ -100,25 +98,25 @@ struct tuning_state
 	int downsample;
 	int downsample_passes;  /* for the recursive filter */
 	double crop;
+	//pthread_rwlock_t avg_lock;
+	//pthread_mutex_t avg_mutex;
+	/* having the iq buffer here is wasteful, but will avoid contention */
 	uint8_t *buf8;
 	int buf_len;
+	//int *comp_fir;
+	//pthread_rwlock_t buf_lock;
+	//pthread_mutex_t buf_mutex;
 };
 
-/**
- * Maximum amount of tuning ranges
- * In this case '3000' is enough for 3GHz bandwidth (in the worst case scenario)
- */
+/* 3000 is enough for 3GHz b/w worst case */
 #define MAX_TUNES	3000
 struct tuning_state tunes[MAX_TUNES];
-
-// The actual tune count / frequency hops / tuning ranges calculated by frequency_range()
 int tune_count = 0;
 
-// Low leakage
 int boxcar = 1;
-// Low leakage fir_size (0 or 9)
 int comp_fir_size = 0;
-
+int peak_hold = 0;
+int no_interval = 0;
 
 void usage(void)
 {
@@ -130,6 +128,7 @@ void usage(void)
                     "\t  will be used.  valid range 1Hz - 2.8MHz)\n"
                     "\t[-i integration_interval (default: 10 seconds)]\n"
                     "\t (buggy if a full sweep takes longer than the interval)\n"
+                    "\t[-n no interval, output directly with milliseconds]\n"
                     "\t[-1 enables single-shot mode (default: off)]\n"
                     "\t[-e exit_timer (default: off/0)]\n"
                     //"\t[-s avg/iir smoothing (default: avg)]\n"
@@ -151,6 +150,7 @@ void usage(void)
                     "\t (enables low-leakage downsample filter,\n"
                     "\t  fir_size can be 0 or 9.  0 has bad roll off,\n"
                     "\t  try with '-c 50%%')\n"
+                    "\t[-P enables peak hold (default: off)]\n"
                     "\t[-D enable direct sampling (default: off)]\n"
                     "\t[-O enable offset tuning (default: off)]\n"
                     "\n"
@@ -419,11 +419,11 @@ void rms_power(struct tuning_state *ts)
 	err = t * 2 * dc - dc * dc * buf_len;
 	p -= (long)round(err);
 
-//    if (!peak_hold) {
+	if (!peak_hold) {
 		ts->avg[0] += p;
-//    } else {
-//        ts->avg[0] = MAX(ts->avg[0], p);
-//    }
+	} else {
+		ts->avg[0] = MAX(ts->avg[0], p);
+	}
 	ts->samples += 1;
 }
 
@@ -697,17 +697,15 @@ void scanner(void)
 				fft_buf[offset+j*2+1] = (int16_t)w;
 			}
 			fix_fft(fft_buf+offset, bin_e);
-
-//            if (!peak_hold) {
+			if (!peak_hold) {
 				for (j=0; j<bin_len; j++) {
 					ts->avg[j] += real_conj(fft_buf[offset+j*2], fft_buf[offset+j*2+1]);
 				}
-//            } else {
-//                for (j=0; j<bin_len; j++) {
-//                    ts->avg[j] = MAX(real_conj(fft_buf[offset+j*2], fft_buf[offset+j*2+1]), ts->avg[j]);
-//                }
-//            }
-            
+			} else {
+				for (j=0; j<bin_len; j++) {
+					ts->avg[j] = MAX(real_conj(fft_buf[offset+j*2], fft_buf[offset+j*2+1]), ts->avg[j]);
+				}
+			}
 			ts->samples += ds;
 		}
 	}
@@ -743,9 +741,9 @@ void csv_dbm(struct tuning_state *ts)
 		dbm  = (double)ts->avg[i];
 		dbm /= (double)ts->rate;
 
-//        if (0 == peak_hold) {
+        if (0 == peak_hold) {
             dbm /= (double) ts->samples;
-//        }
+        }
 
 		dbm  = 10 * log10(dbm);
 		fprintf(file, "%.2f, ", dbm);
@@ -792,7 +790,7 @@ int main(int argc, char **argv)
 	double (*window_fn)(int, int) = rectangle;
 	freq_optarg = "";
 
-	while ((opt = getopt(argc, argv, "f:i:s:t:d:g:p:e:w:c:F:1DOh")) != -1) {
+	while ((opt = getopt(argc, argv, "f:i:s:t:d:g:p:e:w:c:F:1PDOhn")) != -1) {
 		switch (opt) {
 		case 'f': // lower:upper:bin_size
 			freq_optarg = strdup(optarg);
@@ -847,6 +845,9 @@ int main(int argc, char **argv)
 		case '1':
 			single = 1;
 			break;
+		case 'P':
+			peak_hold = 1;
+			break;
 		case 'D':
 			direct_sampling = 1;
 			break;
@@ -857,6 +858,10 @@ int main(int argc, char **argv)
 			boxcar = 0;
 			comp_fir_size = atoi(optarg);
 			break;
+        case 'n':
+            // Do not use periodic outputs
+            no_interval = 1;
+            break;
 		case 'h':
 		default:
 			usage();
@@ -888,11 +893,11 @@ int main(int argc, char **argv)
 	if (interval < 1) {
 		interval = 1;}
 
-//    if (no_interval) {
-//        fprintf(stderr, "Reporting: directly\n");
-//    } else {
-//        fprintf(stderr, "Reporting every %i seconds\n", interval);
-//    }
+    if (no_interval) {
+        fprintf(stderr, "Reporting: directly\n");
+    } else {
+        fprintf(stderr, "Reporting every %i seconds\n", interval);
+    }
 
 	if (!dev_given) {
 		dev_index = verbose_device_search("0");
@@ -971,22 +976,31 @@ int main(int argc, char **argv)
 	}
 	while (!do_exit) {
 		scanner();
-        
 		time_now = time(NULL);
+		if (time_now < next_tick && !no_interval) {
+			continue;}
+		// time, Hz low, Hz high, Hz step, samples, dbm, dbm, ...
+
+        // Get Date, hours, minutes and seconds
         cal_time = localtime(&time_now);
+
         strftime(t_str, 50, "%Y-%m-%d, %H:%M:%S", cal_time);
 
 		for (i=0; i<tune_count; i++) {
-            // Get milliseconds in the for loop because it changes every loop -> really?
-            gettimeofday(&tv, NULL);
-            millisec = lrint(tv.tv_usec/1000.0);
-            // Sometimes it get to a thousand, but the second is not passed yet...
-            if (millisec>=1000) {
-                millisec = 999;
-                tv.tv_sec++;
-            }
+            if (no_interval) {
+                // Get milliseconds in the for loop because it changes every loop
+                gettimeofday(&tv, NULL);
+                millisec = lrint(tv.tv_usec/1000.0);
+                // Sometimes it get to a thousand, but the second is not passed yet...
+                if (millisec>=1000) {
+                    millisec = 999;
+                    tv.tv_sec++;
+                }
 
-            fprintf(file, "%s.%03d, ", t_str, millisec);
+                fprintf(file, "%s.%03d, ", t_str, millisec);
+            } else {
+                fprintf(file, "%s, ", t_str);
+            }
 
 			csv_dbm(&tunes[i]);
 		}
