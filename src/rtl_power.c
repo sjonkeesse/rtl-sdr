@@ -832,14 +832,14 @@ void csv_dbm_info()
     struct tuning_state *lastTs;
     
     firstTs = &tunes[0];
-    lastTs  = &tunes[tune_count];
+    lastTs  = &tunes[tune_count - 1];
     
     len = 1 << firstTs->bin_e;
     ds = firstTs->downsample;
     bin_count = (int)((double)len * (1.0 - firstTs->crop));
     bw2 = (int)(((double)firstTs->rate * (double)bin_count) / (len * 2 * ds));
     
-    fprintf(file, "%i, %i, ", firstTs->freq - bw2, lastTs->freq - bw2);
+    fprintf(file, "%i, %i, ", firstTs->freq - bw2, lastTs->freq + bw2);
 }
 
 void csv_dbm_data(struct tuning_state *ts)
