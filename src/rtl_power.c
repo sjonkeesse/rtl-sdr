@@ -444,7 +444,7 @@ void configure_devices()
     int i, device_count, device_index, r, gain, ppm_error, sample_rate;
     struct tuning_state *ts;
     char str_i[2];
-//    struct rtlsdr_dev_t *device;
+    struct rtlsdr_dev_t *device;
 //    static rtlsdr_dev_t *device;
     
     device_count = rtlsdr_get_device_count();
@@ -461,10 +461,10 @@ void configure_devices()
         
         for (i = 0; i < tune_count; i++) {
             ts = &tunes[i];
-            sprintf(str_i, "%d", i);
             
+            sprintf(str_i, "%d", i);
             device_index = verbose_device_search(str_i);
-            r = rtlsdr_open(&ts->device, (uint32_t)device_index);
+            r = rtlsdr_open(&device, (uint32_t)device_index);
             
             if (r < 0) {
                 fprintf(stderr, "Failed to open rtlsdr device #%d.\n", device_index);
@@ -473,27 +473,26 @@ void configure_devices()
             
             /* Tuner gain */
             if (gain == AUTO_GAIN) {
-                verbose_auto_gain(ts->device);
+                verbose_auto_gain(device);
             } else {
-                gain = nearest_gain(ts->device, gain);
-                verbose_gain_set(ts->device, gain);
+                gain = nearest_gain(device, gain);
+                verbose_gain_set(device, gain);
             }
             
             /* Frequency correction */
-            verbose_ppm_set(ts->device, ppm_error);
+            verbose_ppm_set(device, ppm_error);
             
             /* Reset endpoint before we start reading from it (mandatory) */
-            verbose_reset_buffer(ts->device);
+            verbose_reset_buffer(device);
             
             /* Device sample rate */
-            rtlsdr_set_sample_rate(ts->device, sample_rate);
+            rtlsdr_set_sample_rate(device, sample_rate);
             
             /* Tune */
-            retune(ts->device, ts->freq);
+            retune(device, ts->freq);
             
-//            ts = &tunes[i];
             // TODO USE &device?
-//            ts->device = device;
+            ts->device = device;
         }
         
         fprintf(stderr, "Using a dedicated device for each tuning state.\n");
