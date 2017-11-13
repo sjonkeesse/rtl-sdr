@@ -69,7 +69,7 @@ struct tuning_state
 	double crop;
 	uint8_t *buf8;
 	int buf_len;
-    struct rtlsdr_dev_t *device; // use static?? or struct?
+    static rtlsdr_dev_t *device; // use static?? or struct?
 };
 
 /**
@@ -999,6 +999,8 @@ int main(int argc, char **argv)
     }
 
     if (device_per_ts) {
+        struct tuning_state *ts;
+        
         // Close each device
         for (i = 0; i < tune_count; i++) {
             ts = &tunes[i];
