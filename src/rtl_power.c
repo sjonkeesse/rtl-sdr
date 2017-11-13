@@ -44,7 +44,8 @@
 #define MINIMUM_RATE			1000000
 
 static volatile int do_exit = 0;
-static rtlsdr_dev_t *dev = NULL;
+static rtlsdr_dev_t *global_device = NULL;
+//static rtlsdr_dev_t *dev = NULL;
 FILE *file;
 
 int16_t* Sinewave;
@@ -512,6 +513,31 @@ void configure_devices()
     } else {
         // Use one device for all tuning states with frequency hopping
         
+        device_index = verbose_device_search("0");
+        r = rtlsdr_open(&global_device, (uint32_t)device_index);
+        
+        if (r < 0) {
+            fprintf(stderr, "Failed to open rtlsdr device #%d.\n", device_index);
+            exit(1);
+        }
+        
+        /* Tuner gain */
+        if (gain == AUTO_GAIN) {
+            verbose_auto_gain(global_device);
+        } else {
+            gain = nearest_gain(global_device, gain);
+            verbose_gain_set(global_device, gain);
+        }
+        
+        /* Frequency correction */
+        verbose_ppm_set(global_device, ppm_error);
+        
+        /* Reset endpoint before we start reading from it (mandatory) */
+        verbose_reset_buffer(global_device);
+        
+        /* Device sample rate */
+        rtlsdr_set_sample_rate(global_device, sample_rate);
+        
         fprintf(stderr, "Using one device for all tuning states with frequency hopping.\n");
     }
 }
@@ -609,7 +635,7 @@ long real_conj(int16_t real, int16_t imag)
 	return ((long)real*(long)real + (long)imag*(long)imag);
 }
 
-void scanner(void)
+void single_scanner(void)
 {
 	int i, j, j2, f, n_read, offset, bin_e, bin_len, buf_len, ds, ds_p;
 	int32_t w;
@@ -622,11 +648,11 @@ void scanner(void)
             return;
         }
 		ts = &tunes[i];
-		f = (int)rtlsdr_get_center_freq(dev);
+		f = (int)rtlsdr_get_center_freq(global_device);
 		if (f != ts->freq) {
-			retune(dev, ts->freq);
+			retune(global_device, ts->freq);
         }
-		rtlsdr_read_sync(dev, ts->buf8, buf_len, &n_read);
+		rtlsdr_read_sync(global_device, ts->buf8, buf_len, &n_read);
         
 		if (n_read != buf_len) {
 			fprintf(stderr, "Error: dropped samples.\n");
@@ -700,6 +726,102 @@ void scanner(void)
 			ts->samples += ds;
 		}
 	}
+}
+
+void multiple_scanner(void)
+{
+    int i, j, j2, f, n_read, offset, bin_e, bin_len, buf_len, ds, ds_p;
+    int32_t w;
+    struct tuning_state *ts;
+    bin_e = tunes[0].bin_e;
+    bin_len = 1 << bin_e;
+    buf_len = tunes[0].buf_len;
+    
+    for (i = 0; i < tune_count; i++) {
+        if (do_exit >= 2) {
+            return;
+        }
+        
+        ts = &tunes[i];
+        
+        f = (int)rtlsdr_get_center_freq(ts->device);
+        if (f != ts->freq) {
+            retune(ts->device, ts->freq);
+        }
+        rtlsdr_read_sync(ts->device, ts->buf8, buf_len, &n_read);
+        
+        if (n_read != buf_len) {
+            fprintf(stderr, "Error: dropped samples.\n");
+        }
+        
+        /* rms */
+        if (bin_len == 1) {
+            rms_power(ts);
+            continue;
+        }
+        
+        /* prep for fft */
+        for (j=0; j<buf_len; j++) {
+            fft_buf[j] = (int16_t)ts->buf8[j] - 127;
+        }
+        
+        ds = ts->downsample;
+        ds_p = ts->downsample_passes;
+        
+        if (boxcar && ds > 1) {
+            j=2, j2=0;
+            while (j < buf_len) {
+                fft_buf[j2]   += fft_buf[j];
+                fft_buf[j2+1] += fft_buf[j+1];
+                fft_buf[j] = 0;
+                fft_buf[j+1] = 0;
+                j += 2;
+                if (j % (ds*2) == 0) {
+                    j2 += 2;}
+            }
+        } else if (ds_p) {
+            /* recursive */
+            for (j=0; j < ds_p; j++) {
+                downsample_iq(fft_buf, buf_len >> j);
+            }
+            /* droop compensation */
+            if (comp_fir_size == 9 && ds_p <= CIC_TABLE_MAX) {
+                generic_fir(fft_buf, buf_len >> j, cic_9_tables[ds_p]);
+                generic_fir(fft_buf+1, (buf_len >> j)-1, cic_9_tables[ds_p]);
+            }
+        }
+        
+        remove_dc(fft_buf, buf_len / ds);
+        remove_dc(fft_buf+1, (buf_len / ds) - 1);
+        
+        /* Window function and fft */
+        for (offset=0; offset<(buf_len/ds); offset+=(2*bin_len)) {
+            // todo, let rect skip this
+            for (j=0; j<bin_len; j++) {
+                w =  (int32_t)fft_buf[offset+j*2];
+                w *= (int32_t)(window_coefs[j]);
+                //w /= (int32_t)(ds);
+                fft_buf[offset+j*2]   = (int16_t)w;
+                w =  (int32_t)fft_buf[offset+j*2+1];
+                w *= (int32_t)(window_coefs[j]);
+                //w /= (int32_t)(ds);
+                fft_buf[offset+j*2+1] = (int16_t)w;
+            }
+            fix_fft(fft_buf+offset, bin_e);
+            
+            if (peak_hold) {
+                for (j=0; j<bin_len; j++) {
+                    ts->avg[j] = MAX(real_conj(fft_buf[offset+j*2], fft_buf[offset+j*2+1]), ts->avg[j]);
+                }
+            } else {
+                for (j=0; j<bin_len; j++) {
+                    ts->avg[j] += real_conj(fft_buf[offset+j*2], fft_buf[offset+j*2+1]);
+                }
+            }
+            
+            ts->samples += ds;
+        }
+    }
 }
 
 void csv_dbm(struct tuning_state *ts)
@@ -949,7 +1071,11 @@ int main(int argc, char **argv)
 	}
     
 	while (!do_exit) {
-		scanner();
+        if (device_per_ts) {
+            multiple_scanner();
+        } else {
+            single_scanner();
+        }
         
 		time_now = time(NULL);
         if (time_now < next_tick && 0 == no_interval) {
@@ -1021,6 +1147,6 @@ int main(int argc, char **argv)
 	//	free(tunes[i].buf8);
 	//}
 
-    return r >= 0 ? r : -r;
+    return 0;
 }
 
