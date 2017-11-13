@@ -69,6 +69,7 @@ struct tuning_state
 	double crop;
 	uint8_t *buf8;
 	int buf_len;
+    static rtlsdr_dev_t device; // use static?? or struct?
 };
 
 /**
@@ -89,6 +90,8 @@ int comp_fir_size = 0;
 int peak_hold = 1;
 // The use of an interval
 int no_interval = 0;
+// The use of an interval
+int device_per_ts = 0;
 
 
 void usage(void)
@@ -123,7 +126,6 @@ void usage(void)
                     "\t  try with '-c 50%%')\n"
                     "\t[-P disables peak hold (default: on)]\n"
                     "\t[-D enable direct sampling (default: off)]\n"
-                    "\t[-O enable offset tuning (default: off)]\n"
                     "\n"
                     "CSV FFT output columns:\n"
                     "\tdate, time, Hz low, Hz high, Hz step, samples, dbm, dbm, ...\n\n"
@@ -154,24 +156,11 @@ void multi_bail(void)
 	}
 }
 
-#ifdef _WIN32
-BOOL WINAPI
-sighandler(int signum)
-{
-	if (CTRL_C_EVENT == signum) {
-		do_exit++;
-		multi_bail();
-		return TRUE;
-	}
-	return FALSE;
-}
-#else
 static void sighandler(int signum)
 {
 	do_exit++;
 	multi_bail();
 }
-#endif
 
 /* more cond dumbness */
 #define safe_cond_signal(n, m) pthread_mutex_lock(m); pthread_cond_signal(n); pthread_mutex_unlock(m)
@@ -444,6 +433,70 @@ void frequency_range(char *arg, double crop)
 	fprintf(stderr, "Buffer size: %i bytes (%0.2fms)\n", buf_len, 1000 * 0.5 * (float)buf_len / (float)bw_used);
 }
 
+/**
+ * Configure the dongles by tuning states
+ * If tuning state count is equal to amount of connected devices,
+ * then use a device for each tuning state (ts). Otherwise use
+ * one device with frequency hopping
+ */
+void configure_devices()
+{
+    int device_count, device_index, r, gain, ppm_error, sample_rate;
+    struct tuning_state *ts;
+    struct rtlsdr_dev_t *device;
+//    static rtlsdr_dev_t *device;
+    
+    device_count = rtlsdr_get_device_count();
+    sample_rate = (uint32_t)tunes[0].rate;
+    // TODO use input flags
+    gain = 500;
+    ppm_error = 0;
+    
+    if (device_count == tune_count) {
+        // Use one device for each tuning state
+        
+        // Global variable
+        device_per_ts = 1;
+        
+        for (i = 0; i < tune_count; i++) {
+            device_index = verbose_device_search(i);
+            r = rtlsdr_open(&device, (uint32_t)device_index);
+            
+            if (r < 0) {
+                fprintf(stderr, "Failed to open rtlsdr device #%d.\n", device_index);
+                exit(1);
+            }
+            
+            /* Tuner gain */
+            if (gain == AUTO_GAIN) {
+                verbose_auto_gain(device);
+            } else {
+                gain = nearest_gain(device, gain);
+                verbose_gain_set(device, gain);
+            }
+            
+            /* Frequency correction */
+            verbose_ppm_set(device, ppm_error);
+            
+            /* Reset endpoint before we start reading from it (mandatory) */
+            verbose_reset_buffer(device);
+            
+            /* Device sample rate */
+            rtlsdr_set_sample_rate(device, sample_rate);
+            
+            ts = &tunes[i];
+            // TODO USE &device?
+            ts->device = device;
+        }
+        
+        fprintf(stderr, "Using a dedicated device for each tuning state.\n");
+    } else {
+        // Use one device for all tuning states with frequency hopping
+        
+        fprintf(stderr, "Using one device for all tuning states with frequency hopping.\n");
+    }
+}
+
 void retune(rtlsdr_dev_t *d, int freq)
 {
 	uint8_t dump[BUFFER_DUMP];
@@ -706,15 +759,14 @@ int main(int argc, char **argv)
 	int i, length, r, opt, wb_mode = 0;
 	int f_set = 0;
 	int gain = AUTO_GAIN; // tenths of a dB
-	int dev_index = 0;
-	int dev_given = 0;
+//    int dev_index = 0;
+//    int dev_given = 0;
 	int ppm_error = 0;
 	int interval = 10;
 	int fft_threads = 1;
 	int smoothing = 0;
 	int single = 0;
 	int direct_sampling = 0;
-	int offset_tuning = 0;
 	double crop = 0.0;
 	char *freq_optarg;
 	time_t next_tick;
@@ -727,7 +779,7 @@ int main(int argc, char **argv)
 	double (*window_fn)(int, int) = rectangle; // 1.0
 	freq_optarg = "";
 
-	while ((opt = getopt(argc, argv, "f:i:s:t:g:p:e:c:F:1PDOhn")) != -1) {
+	while ((opt = getopt(argc, argv, "f:i:s:t:g:p:e:c:F:1PDhn")) != -1) {
 		switch (opt) {
 		case 'f': // lower:upper:bin_size
 			freq_optarg = strdup(optarg);
@@ -770,9 +822,6 @@ int main(int argc, char **argv)
 		case 'D':
 			direct_sampling = 1;
 			break;
-		case 'O':
-			offset_tuning = 1;
-			break;
 		case 'F':
 			boxcar = 0;
 			comp_fir_size = atoi(optarg);
@@ -800,10 +849,12 @@ int main(int argc, char **argv)
 	}
 
 	frequency_range(freq_optarg, crop);
-
-	if (tune_count == 0) {
-		usage();
+    
+    if (tune_count == 0) {
+        usage();
     }
+    
+    configure_devices();
 
 	if (argc <= optind) {
 		filename = "-";
@@ -821,20 +872,20 @@ int main(int argc, char **argv)
         fprintf(stderr, "Reporting every %i seconds\n", interval);
     }
 
-	if (!dev_given) {
-		dev_index = verbose_device_search("0");
-	}
-
-	if (dev_index < 0) {
-		exit(1);
-	}
-
-	r = rtlsdr_open(&dev, (uint32_t)dev_index);
-    
-	if (r < 0) {
-		fprintf(stderr, "Failed to open rtlsdr device #%d.\n", dev_index);
-		exit(1);
-	}
+//    if (!dev_given) {
+//        dev_index = verbose_device_search("0");
+//    }
+//
+//    if (dev_index < 0) {
+//        exit(1);
+//    }
+//
+//    r = rtlsdr_open(&dev, (uint32_t)dev_index);
+//
+//    if (r < 0) {
+//        fprintf(stderr, "Failed to open rtlsdr device #%d.\n", dev_index);
+//        exit(1);
+//    }
     
     sigact.sa_handler = sighandler;
     sigemptyset(&sigact.sa_mask);
@@ -844,26 +895,21 @@ int main(int argc, char **argv)
     sigaction(SIGQUIT, &sigact, NULL);
     sigaction(SIGPIPE, &sigact, NULL);
 
-	if (direct_sampling) {
-        // Bypass SDR tuner module
-		verbose_direct_sampling(dev, 1);
-	}
+//    if (direct_sampling) {
+//        // Bypass SDR tuner module
+//        verbose_direct_sampling(dev, 1);
+//    }
 
-	if (offset_tuning) {
-        // Only apply to E4000 tuners
-		verbose_offset_tuning(dev);
-	}
-
-	/* Set the tuner gain */
-	if (gain == AUTO_GAIN) {
-		verbose_auto_gain(dev);
-	} else {
-		gain = nearest_gain(dev, gain);
-		verbose_gain_set(dev, gain);
-	}
+//    /* Set the tuner gain */
+//    if (gain == AUTO_GAIN) {
+//        verbose_auto_gain(dev);
+//    } else {
+//        gain = nearest_gain(dev, gain);
+//        verbose_gain_set(dev, gain);
+//    }
 
     // Frequency correction (lowercase p flag);
-	verbose_ppm_set(dev, ppm_error);
+//    verbose_ppm_set(dev, ppm_error);
 
 	if (strcmp(filename, "-") == 0) {
         /* Write log to stdout */
@@ -877,10 +923,10 @@ int main(int argc, char **argv)
 	}
 
 	/* Reset endpoint before we start reading from it (mandatory) */
-	verbose_reset_buffer(dev);
+//    verbose_reset_buffer(dev);
 
 	/* Actually do stuff */
-	rtlsdr_set_sample_rate(dev, (uint32_t)tunes[0].rate);
+//    rtlsdr_set_sample_rate(dev, (uint32_t)tunes[0].rate);
 	sine_table(tunes[0].bin_e);
 	next_tick = time(NULL) + interval;
 	
@@ -946,7 +992,22 @@ int main(int argc, char **argv)
 		fclose(file);
     }
 
-	rtlsdr_close(dev);
+    if (device_per_ts) {
+        // Close each device
+        for (i = 0; i < tune_count; i++) {
+//            ts = &tunes[i];
+//            ts->device = device;
+            // TODO Use &? -> nee
+            rtlsdr_close(tunes[i]->device);
+        }
+    } else {
+        // Close global device
+        // TODO
+//        rtlsdr_close(global_device);
+    }
+    
+    
+    
 	free(fft_buf);
 	free(window_coefs);
 	//for (i=0; i<tune_count; i++) {
