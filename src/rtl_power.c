@@ -505,7 +505,7 @@ void configure_devices()
             retune(device, ts->freq);
             
             // TODO USE &device?
-            ts->device = &device;
+            ts->device = device;
         }
         
         fprintf(stderr, "Using a dedicated device for each tuning state.\n");
@@ -991,7 +991,7 @@ int main(int argc, char **argv)
 	if (do_exit) {
 		fprintf(stderr, "\nUser cancel, exiting...\n");
     } else {
-		fprintf(stderr, "\nLibrary error %d, exiting...\n", r);
+		fprintf(stderr, "\nLibrary error, exiting...\n");
     }
 
 	if (file != stdout) {
