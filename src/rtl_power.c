@@ -871,15 +871,6 @@ void csv_dbm_data(struct tuning_state *ts)
         fprintf(file, "%.2f, ", dbm);
     }
     
-    dbm = (double)ts->avg[i2] / ((double)ts->rate * (double)ts->samples);
-    
-    if (ts->bin_e == 0) {
-        dbm = ((double)ts->avg[0] / ((double)ts->rate * (double)ts->samples));
-    }
-    
-    dbm  = 10 * log10(dbm);
-    fprintf(file, "%.2f\n", dbm);
-    
     for (i=0; i<len; i++) {
         ts->avg[i] = 0L;
     }
@@ -1120,10 +1111,10 @@ int main(int argc, char **argv)
         fprintf(file, "%s.%03d, ", t_str, millisec);
         
         csv_dbm_info();
-        
 		for (i = 0; i < tune_count; i++) {
             csv_dbm_data(&tunes[i]);
 		}
+        fprintf(file, "\n");
 
 		fflush(file);
         
