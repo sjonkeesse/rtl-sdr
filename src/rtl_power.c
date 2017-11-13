@@ -318,6 +318,19 @@ void rms_power(struct tuning_state *ts)
 	ts->samples += 1;
 }
 
+void retune(rtlsdr_dev_t *d, int freq)
+{
+    uint8_t dump[BUFFER_DUMP];
+    int n_read;
+    rtlsdr_set_center_freq(d, (uint32_t)freq);
+    /* wait for settling and flush buffer */
+    usleep(5000);
+    rtlsdr_read_sync(d, &dump, BUFFER_DUMP, &n_read);
+    if (n_read != BUFFER_DUMP) {
+        fprintf(stderr, "Error: bad retune.\n");
+    }
+}
+
 /**
  * Flesh out the tunes[] for scanning
  * Do we want the fewest ranges (easy) or the fewest bins (harder)?
@@ -444,8 +457,8 @@ void configure_devices()
     int i, device_count, device_index, r, gain, ppm_error, sample_rate;
     struct tuning_state *ts;
     char str_i[2];
-    struct rtlsdr_dev_t *device;
-//    static rtlsdr_dev_t *device;
+//    struct rtlsdr_dev_t *device;
+    static rtlsdr_dev_t *device;
     
     device_count = rtlsdr_get_device_count();
     sample_rate = (uint32_t)tunes[0].rate;
@@ -500,19 +513,6 @@ void configure_devices()
         // Use one device for all tuning states with frequency hopping
         
         fprintf(stderr, "Using one device for all tuning states with frequency hopping.\n");
-    }
-}
-
-void retune(rtlsdr_dev_t *d, int freq)
-{
-	uint8_t dump[BUFFER_DUMP];
-	int n_read;
-	rtlsdr_set_center_freq(d, (uint32_t)freq);
-	/* wait for settling and flush buffer */
-	usleep(5000);
-	rtlsdr_read_sync(d, &dump, BUFFER_DUMP, &n_read);
-	if (n_read != BUFFER_DUMP) {
-		fprintf(stderr, "Error: bad retune.\n");
     }
 }
 
