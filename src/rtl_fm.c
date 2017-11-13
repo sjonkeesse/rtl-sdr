@@ -500,10 +500,10 @@ int polar_disc_lut(int ar, int aj, int br, int bj)
 	x = (cj << atan_lut_coef) / cr;
 	x_abs = abs(x);
 
-	if (x_abs >= atan_lut_size) {
-		/* we can use linear range, but it is not necessary */
-		return (cj > 0) ? 1<<13 : -1<<13;
-	}
+//    if (x_abs >= atan_lut_size) {
+//        /* we can use linear range, but it is not necessary */
+//        return (cj > 0) ? 1 << 13 : -1 << 13;
+//    }
 
 	if (x > 0) {
 		return (cj > 0) ? atan_lut[x] : atan_lut[x] - (1<<14);

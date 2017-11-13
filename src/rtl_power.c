@@ -141,8 +141,6 @@ void usage(void)
                     "\t (omitting the filename also uses stdout)\n"
                     "\n"
                     "Experimental options:\n"
-                    "\t[-w window (default: rectangle)]\n"
-                    "\t (hamming, blackman, blackman-harris, hann-poisson, bartlett, youssef)\n"
                     // kaiser
                     "\t[-c crop_percent (default: 0%%, recommended: 20%%-50%%)]\n"
                     "\t (discards data at the edges, 100%% discards everything)\n"
@@ -230,12 +228,6 @@ double log2(double n)
 }
 #endif
 
-/* FFT based on fix_fft.c by Roberts, Slaney and Bouras
-   http://www.jjj.de/fft/fftpage.html
-   16 bit ints for everything
-   -32768..+32768 maps to -1.0..+1.0
-*/
-
 void sine_table(int size)
 {
 	int i;
@@ -252,16 +244,27 @@ void sine_table(int size)
 	}
 }
 
+/**
+ * Fixed point multiply and scale
+ * used by fix_fft()
+ */
 inline int16_t FIX_MPY(int16_t a, int16_t b)
-/* fixed point multiply and scale */
 {
 	int c = ((int)a * (int)b) >> 14;
 	b = c & 0x01;
 	return (c >> 1) + b;
 }
 
+/**
+ * FFT = Fixed-point in-place Fast Fourier Transform
+ * FFT based on fix_fft.c by Roberts, Slaney and Bouras
+ * http://www.jjj.de/fft/fftpage.html
+ *  16 bit ints for everything
+ *  -32768..+32768 maps to -1.0..+1.0
+ *
+ * interleaved iq[], 0 <= n < 2**m, changes in place
+ */
 int fix_fft(int16_t iq[], int m)
-/* interleaved iq[], 0 <= n < 2**m, changes in place */
 {
 	int mr, nn, i, j, l, k, istep, n, shift;
 	int16_t qr, qi, tr, ti, wr, wi;
@@ -323,84 +326,10 @@ double rectangle(int i, int length)
 	return 1.0;
 }
 
-double hamming(int i, int length)
-{
-	double a, b, w, N1;
-	a = 25.0/46.0;
-	b = 21.0/46.0;
-	N1 = (double)(length-1);
-	w = a - b*cos(2*i*M_PI/N1);
-	return w;
-}
-
-double blackman(int i, int length)
-{
-	double a0, a1, a2, w, N1;
-	a0 = 7938.0/18608.0;
-	a1 = 9240.0/18608.0;
-	a2 = 1430.0/18608.0;
-	N1 = (double)(length-1);
-	w = a0 - a1*cos(2*i*M_PI/N1) + a2*cos(4*i*M_PI/N1);
-	return w;
-}
-
-double blackman_harris(int i, int length)
-{
-	double a0, a1, a2, a3, w, N1;
-	a0 = 0.35875;
-	a1 = 0.48829;
-	a2 = 0.14128;
-	a3 = 0.01168;
-	N1 = (double)(length-1);
-	w = a0 - a1*cos(2*i*M_PI/N1) + a2*cos(4*i*M_PI/N1) - a3*cos(6*i*M_PI/N1);
-	return w;
-}
-
-double hann_poisson(int i, int length)
-{
-	double a, N1, w;
-	a = 2.0;
-	N1 = (double)(length-1);
-	w = 0.5 * (1 - cos(2*M_PI*i/N1)) * \
-	    pow(M_E, (-a*(double)abs((int)(N1-1-2*i)))/N1);
-	return w;
-}
-
-double youssef(int i, int length)
-/* really a blackman-harris-poisson window, but that is a mouthful */
-{
-	double a, a0, a1, a2, a3, w, N1;
-	a0 = 0.35875;
-	a1 = 0.48829;
-	a2 = 0.14128;
-	a3 = 0.01168;
-	N1 = (double)(length-1);
-	w = a0 - a1*cos(2*i*M_PI/N1) + a2*cos(4*i*M_PI/N1) - a3*cos(6*i*M_PI/N1);
-	a = 0.0025;
-	w *= pow(M_E, (-a*(double)abs((int)(N1-1-2*i)))/N1);
-	return w;
-}
-
-double kaiser(int i, int length)
-// todo, become more smart
-{
-	return 1.0;
-}
-
-double bartlett(int i, int length)
-{
-	double N1, L, w;
-	L = (double)length;
-	N1 = L - 1;
-	w = (i - N1/2) / (L/2);
-	if (w < 0) {
-		w = -w;}
-	w = 1 - w;
-	return w;
-}
-
+/**
+ * For bins between 1MHz and 2MHz
+ */
 void rms_power(struct tuning_state *ts)
-/* for bins between 1MHz and 2MHz */
 {
 	int i, s;
 	uint8_t *buf = ts->buf8;
@@ -789,10 +718,10 @@ int main(int argc, char **argv)
 	struct timeval tv;		// For using ms
 	char t_str[50];
 	struct tm *cal_time;
-	double (*window_fn)(int, int) = rectangle;
+	double (*window_fn)(int, int) = rectangle; // 1.0
 	freq_optarg = "";
 
-	while ((opt = getopt(argc, argv, "f:i:s:t:d:g:p:e:w:c:F:1DOh")) != -1) {
+	while ((opt = getopt(argc, argv, "f:i:s:t:d:g:p:e:c:F:1DOh")) != -1) {
 		switch (opt) {
 		case 'f': // lower:upper:bin_size
 			freq_optarg = strdup(optarg);
@@ -819,24 +748,6 @@ int main(int argc, char **argv)
 				smoothing = 0;}
 			if (strcmp("iir",  optarg) == 0) {
 				smoothing = 1;}
-			break;
-		case 'w':
-			if (strcmp("rectangle",  optarg) == 0) {
-				window_fn = rectangle;}
-			if (strcmp("hamming",  optarg) == 0) {
-				window_fn = hamming;}
-			if (strcmp("blackman",  optarg) == 0) {
-				window_fn = blackman;}
-			if (strcmp("blackman-harris",  optarg) == 0) {
-				window_fn = blackman_harris;}
-			if (strcmp("hann-poisson",  optarg) == 0) {
-				window_fn = hann_poisson;}
-			if (strcmp("youssef",  optarg) == 0) {
-				window_fn = youssef;}
-			if (strcmp("kaiser",  optarg) == 0) {
-				window_fn = kaiser;}
-			if (strcmp("bartlett",  optarg) == 0) {
-				window_fn = bartlett;}
 			break;
 		case 't':
 			fft_threads = atoi(optarg);
