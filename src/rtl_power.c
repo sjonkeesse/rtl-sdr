@@ -824,61 +824,124 @@ void multiple_scanner(void)
     }
 }
 
-void csv_dbm(struct tuning_state *ts)
+void csv_dbm_info()
 {
-	int i, len, ds, i1, i2, bw2, bin_count;
-	long tmp;
-	double dbm;
-	len = 1 << ts->bin_e;
-	ds = ts->downsample;
-	/* fix FFT stuff quirks */
-	if (ts->bin_e > 0) {
-		/* nuke DC component (not effective for all windows) */
-		ts->avg[0] = ts->avg[1];
-		/* FFT is translated by 180 degrees */
-		for (i=0; i<len/2; i++) {
-			tmp = ts->avg[i];
-			ts->avg[i] = ts->avg[i+len/2];
-			ts->avg[i+len/2] = tmp;
-		}
-	}
-	/* Hz low, Hz high, Hz step, samples, dbm, dbm, ... */
-	bin_count = (int)((double)len * (1.0 - ts->crop));
-	bw2 = (int)(((double)ts->rate * (double)bin_count) / (len * 2 * ds));
-	fprintf(file, "%i, %i, %.2f, %i, ", ts->freq - bw2, ts->freq + bw2,
-		(double)ts->rate / (double)(len*ds), ts->samples);
-	// something seems off with the dbm math
-	i1 = 0 + (int)((double)len * ts->crop * 0.5);
-	i2 = (len-1) - (int)((double)len * ts->crop * 0.5);
+    struct tuning_state *firstTs;
+    struct tuning_state *lastTs;
     
-	for (i=i1; i<=i2; i++) {
-		dbm  = (double)ts->avg[i];
-		dbm /= (double)ts->rate;
+    firstTs = &tunes[0];
+    lastTs  = &tunes[tune_count - 1];
+    
+    fprintf(file, "%i, %i, ", firstTs->freq, lastTs->freq);
+}
 
+void csv_dbm_data(struct tuning_state *ts)
+{
+    int i, len, i1, i2, bin_count;
+    long tmp;
+    double dbm;
+    len = 1 << ts->bin_e;
+    
+    /* fix FFT stuff quirks */
+    if (ts->bin_e > 0) {
+        /* nuke DC component (not effective for all windows) */
+        ts->avg[0] = ts->avg[1];
+        /* FFT is translated by 180 degrees */
+        for (i=0; i<len/2; i++) {
+            tmp = ts->avg[i];
+            ts->avg[i] = ts->avg[i+len/2];
+            ts->avg[i+len/2] = tmp;
+        }
+    }
+    
+    // something seems off with the dbm math
+    i1 = 0 + (int)((double)len * ts->crop * 0.5);
+    i2 = (len-1) - (int)((double)len * ts->crop * 0.5);
+    
+    for (i=i1; i<=i2; i++) {
+        dbm  = (double)ts->avg[i];
+        dbm /= (double)ts->rate;
+        
         if (0 == peak_hold) {
             // If peak hold is disabled
             dbm /= (double) ts->samples;
         }
-
-		dbm  = 10 * log10(dbm);
-		fprintf(file, "%.2f, ", dbm);
-	}
-	
-    dbm = (double)ts->avg[i2] / ((double)ts->rate * (double)ts->samples);
-	
-    if (ts->bin_e == 0) {
-		dbm = ((double)ts->avg[0] / ((double)ts->rate * (double)ts->samples));
+        
+        dbm  = 10 * log10(dbm);
+        fprintf(file, "%.2f, ", dbm);
     }
     
-	dbm  = 10 * log10(dbm);
-	fprintf(file, "%.2f\n", dbm);
+    dbm = (double)ts->avg[i2] / ((double)ts->rate * (double)ts->samples);
     
-	for (i=0; i<len; i++) {
-		ts->avg[i] = 0L;
-	}
-	
+    if (ts->bin_e == 0) {
+        dbm = ((double)ts->avg[0] / ((double)ts->rate * (double)ts->samples));
+    }
+    
+    dbm  = 10 * log10(dbm);
+    fprintf(file, "%.2f\n", dbm);
+    
+    for (i=0; i<len; i++) {
+        ts->avg[i] = 0L;
+    }
+    
     ts->samples = 0;
 }
+
+//void csv_dbm(struct tuning_state *ts)
+//{
+//    int i, len, ds, i1, i2, bw2, bin_count;
+//    long tmp;
+//    double dbm;
+//    len = 1 << ts->bin_e;
+//    ds = ts->downsample;
+//    /* fix FFT stuff quirks */
+//    if (ts->bin_e > 0) {
+//        /* nuke DC component (not effective for all windows) */
+//        ts->avg[0] = ts->avg[1];
+//        /* FFT is translated by 180 degrees */
+//        for (i=0; i<len/2; i++) {
+//            tmp = ts->avg[i];
+//            ts->avg[i] = ts->avg[i+len/2];
+//            ts->avg[i+len/2] = tmp;
+//        }
+//    }
+//    /* Hz low, Hz high, Hz step, samples, dbm, dbm, ... */
+//    bin_count = (int)((double)len * (1.0 - ts->crop));
+//    bw2 = (int)(((double)ts->rate * (double)bin_count) / (len * 2 * ds));
+//    fprintf(file, "%i, %i, %.2f, %i, ", ts->freq - bw2, ts->freq + bw2,
+//        (double)ts->rate / (double)(len*ds), ts->samples);
+//    // something seems off with the dbm math
+//    i1 = 0 + (int)((double)len * ts->crop * 0.5);
+//    i2 = (len-1) - (int)((double)len * ts->crop * 0.5);
+//
+//    for (i=i1; i<=i2; i++) {
+//        dbm  = (double)ts->avg[i];
+//        dbm /= (double)ts->rate;
+//
+//        if (0 == peak_hold) {
+//            // If peak hold is disabled
+//            dbm /= (double) ts->samples;
+//        }
+//
+//        dbm  = 10 * log10(dbm);
+//        fprintf(file, "%.2f, ", dbm);
+//    }
+//
+//    dbm = (double)ts->avg[i2] / ((double)ts->rate * (double)ts->samples);
+//
+//    if (ts->bin_e == 0) {
+//        dbm = ((double)ts->avg[0] / ((double)ts->rate * (double)ts->samples));
+//    }
+//
+//    dbm  = 10 * log10(dbm);
+//    fprintf(file, "%.2f\n", dbm);
+//
+//    for (i=0; i<len; i++) {
+//        ts->avg[i] = 0L;
+//    }
+//
+//    ts->samples = 0;
+//}
 
 int main(int argc, char **argv)
 {
@@ -887,8 +950,6 @@ int main(int argc, char **argv)
 	int i, length, r, opt, wb_mode = 0;
 	int f_set = 0;
 	int gain = AUTO_GAIN; // tenths of a dB
-//    int dev_index = 0;
-//    int dev_given = 0;
 	int ppm_error = 0;
 	int interval = 10;
 	int fft_threads = 1;
@@ -913,10 +974,6 @@ int main(int argc, char **argv)
 			freq_optarg = strdup(optarg);
 			f_set = 1;
 			break;
-//        case 'd':
-//            dev_index = verbose_device_search(optarg);
-//            dev_given = 1;
-//            break;
 		case 'g':
 			gain = (int)(atof(optarg) * 10);
 			break;
@@ -999,21 +1056,6 @@ int main(int argc, char **argv)
     } else {
         fprintf(stderr, "Reporting every %i seconds\n", interval);
     }
-
-//    if (!dev_given) {
-//        dev_index = verbose_device_search("0");
-//    }
-//
-//    if (dev_index < 0) {
-//        exit(1);
-//    }
-//
-//    r = rtlsdr_open(&dev, (uint32_t)dev_index);
-//
-//    if (r < 0) {
-//        fprintf(stderr, "Failed to open rtlsdr device #%d.\n", dev_index);
-//        exit(1);
-//    }
     
     sigact.sa_handler = sighandler;
     sigemptyset(&sigact.sa_mask);
@@ -1022,22 +1064,6 @@ int main(int argc, char **argv)
     sigaction(SIGTERM, &sigact, NULL);
     sigaction(SIGQUIT, &sigact, NULL);
     sigaction(SIGPIPE, &sigact, NULL);
-
-//    if (direct_sampling) {
-//        // Bypass SDR tuner module
-//        verbose_direct_sampling(dev, 1);
-//    }
-
-//    /* Set the tuner gain */
-//    if (gain == AUTO_GAIN) {
-//        verbose_auto_gain(dev);
-//    } else {
-//        gain = nearest_gain(dev, gain);
-//        verbose_gain_set(dev, gain);
-//    }
-
-    // Frequency correction (lowercase p flag);
-//    verbose_ppm_set(dev, ppm_error);
 
 	if (strcmp(filename, "-") == 0) {
         /* Write log to stdout */
@@ -1050,11 +1076,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-	/* Reset endpoint before we start reading from it (mandatory) */
-//    verbose_reset_buffer(dev);
-
-	/* Actually do stuff */
-//    rtlsdr_set_sample_rate(dev, (uint32_t)tunes[0].rate);
 	sine_table(tunes[0].bin_e);
 	next_tick = time(NULL) + interval;
 	
@@ -1086,20 +1107,22 @@ int main(int argc, char **argv)
         cal_time = localtime(&time_now);
         strftime(t_str, 50, "%Y-%m-%d, %H:%M:%S", cal_time);
 
-		for (i=0; i<tune_count; i++) {
-            // Get milliseconds in the for loop because it changes every loop
-            gettimeofday(&tv, NULL);
-            millisec = lrint(tv.tv_usec/1000.0);
-            
-            // Sometimes it get to a thousand, but the second is not passed yet...
-            if (millisec>=1000) {
-                millisec = 999;
-                tv.tv_sec++;
-            }
-            
-            fprintf(file, "%s.%03d, ", t_str, millisec);
-            
-			csv_dbm(&tunes[i]);
+        // Get milliseconds
+        gettimeofday(&tv, NULL);
+        millisec = lrint(tv.tv_usec/1000.0);
+        
+        // Sometimes it get to a thousand, but the second is not passed yet...
+        if (millisec>=1000) {
+            millisec = 999;
+            tv.tv_sec++;
+        }
+
+        fprintf(file, "%s.%03d, ", t_str, millisec);
+        
+        csv_dbm_info();
+        
+		for (i = 0; i < tune_count; i++) {
+            csv_dbm_data(&tunes[i]);
 		}
 
 		fflush(file);
@@ -1134,11 +1157,8 @@ int main(int argc, char **argv)
         }
     } else {
         // Close global device
-        // TODO
-//        rtlsdr_close(global_device);
+        rtlsdr_close(global_device);
     }
-    
-    
     
 	free(fft_buf);
 	free(window_coefs);
