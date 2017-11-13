@@ -826,13 +826,20 @@ void multiple_scanner(void)
 
 void csv_dbm_info()
 {
+    int len, bw2, bin_count;
+    
     struct tuning_state *firstTs;
     struct tuning_state *lastTs;
     
     firstTs = &tunes[0];
     lastTs  = &tunes[tune_count - 1];
     
-    fprintf(file, "%i, %i, ", firstTs->freq, lastTs->freq);
+    len = 1 << firstTs->bin_e;
+    ds = firstTs->downsample;
+    bin_count = (int)((double)len * (1.0 - firstTs->crop));
+    bw2 = (int)(((double)firstTs->rate * (double)bin_count) / (len * 2 * ds));
+    
+    fprintf(file, "%i, %i, ", firstTs->freq - bw2, lastTs->freq - bw2);
 }
 
 void csv_dbm_data(struct tuning_state *ts)
