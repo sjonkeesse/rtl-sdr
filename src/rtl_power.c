@@ -69,7 +69,7 @@ struct tuning_state
 	double crop;
 	uint8_t *buf8;
 	int buf_len;
-    static rtlsdr_dev_t *device; // use static?? or struct?
+    struct rtlsdr_dev_t *device;
 };
 
 /**
@@ -505,7 +505,7 @@ void configure_devices()
             retune(device, ts->freq);
             
             // TODO USE &device?
-            ts->device = device;
+            ts->device = &device;
         }
         
         fprintf(stderr, "Using a dedicated device for each tuning state.\n");
