@@ -826,7 +826,7 @@ void multiple_scanner(void)
 
 void csv_dbm_info()
 {
-    int len, bw2, bin_count;
+    int len, ds, bw2, bin_count;
     
     struct tuning_state *firstTs;
     struct tuning_state *lastTs;
