@@ -832,7 +832,7 @@ void csv_dbm_info()
     struct tuning_state *lastTs;
     
     firstTs = &tunes[0];
-    lastTs  = &tunes[tune_count - 1];
+    lastTs  = &tunes[tune_count];
     
     len = 1 << firstTs->bin_e;
     ds = firstTs->downsample;
