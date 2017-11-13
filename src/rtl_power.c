@@ -69,7 +69,7 @@ struct tuning_state
 	double crop;
 	uint8_t *buf8;
 	int buf_len;
-    struct rtlsdr_dev_t *device;
+    rtlsdr_dev_t *device;
 };
 
 /**
