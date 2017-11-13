@@ -18,26 +18,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-
-/*
- * rtl_power: general purpose FFT integrator
- * -f low_freq:high_freq:max_bin_size
- * -i seconds
- * outputs CSV
- * time, low, high, step, db, db, db ...
- * db optional?  raw output might be better for noise correction
- * todo:
- *	threading
- *	randomized hopping
- *	noise correction
- *	continuous IIR
- *	general astronomy usefulness
- *	multiple dongles
- *	multiple FFT workers
- *	check edge cropping for off-by-one and rounding errors
- *	1.8MS/s for hiding xtal harmonics
- */
-
 #include <errno.h>
 #include <signal.h>
 #include <string.h>
@@ -46,20 +26,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-//#ifndef _WIN32
 #include <unistd.h>
-//#else
-//#include <windows.h>
-//#include <fcntl.h>
-//#include <io.h>
-//#include "getopt/getopt.h"
-//#define usleep(x) Sleep(x/1000)
-//#if defined(_MSC_VER) && (_MSC_VER < 1800)
-//#define round(x) (x > 0.0 ? floor(x + 0.5): ceil(x - 0.5))
-//#endif
-//#define _USE_MATH_DEFINES
-//#endif
-
 #include <math.h>
 #include <pthread.h>
 #include <libusb.h>
@@ -118,6 +85,10 @@ int tune_count = 0;
 int boxcar = 1;
 // Low leakage fir_size (0 or 9)
 int comp_fir_size = 0;
+// Hold the peak of the samples if interval is used
+int peak_hold = 1;
+// The use of an interval
+int no_interval = 0;
 
 
 void usage(void)
@@ -130,6 +101,7 @@ void usage(void)
                     "\t  will be used.  valid range 1Hz - 2.8MHz)\n"
                     "\t[-i integration_interval (default: 10 seconds)]\n"
                     "\t (buggy if a full sweep takes longer than the interval)\n"
+                    "\t[-n no interval, output directly with milliseconds]\n"
                     "\t[-1 enables single-shot mode (default: off)]\n"
                     "\t[-e exit_timer (default: off/0)]\n"
                     //"\t[-s avg/iir smoothing (default: avg)]\n"
@@ -149,6 +121,7 @@ void usage(void)
                     "\t (enables low-leakage downsample filter,\n"
                     "\t  fir_size can be 0 or 9.  0 has bad roll off,\n"
                     "\t  try with '-c 50%%')\n"
+                    "\t[-P disables peak hold (default: on)]\n"
                     "\t[-D enable direct sampling (default: off)]\n"
                     "\t[-O enable offset tuning (default: off)]\n"
                     "\n"
@@ -348,11 +321,11 @@ void rms_power(struct tuning_state *ts)
 	err = t * 2 * dc - dc * dc * buf_len;
 	p -= (long)round(err);
 
-//    if (!peak_hold) {
-		ts->avg[0] += p;
-//    } else {
-//        ts->avg[0] = MAX(ts->avg[0], p);
-//    }
+    if (peak_hold) {
+        ts->avg[0] = MAX(ts->avg[0], p);
+    } else {
+        ts->avg[0] += p;
+    }
 	ts->samples += 1;
 }
 
@@ -549,13 +522,11 @@ void generic_fir(int16_t *data, int length, int *fir)
 void downsample_iq(int16_t *data, int length)
 {
 	fifth_order(data, length);
-	//remove_dc(data, length);
 	fifth_order(data+1, length-1);
-	//remove_dc(data+1, length-1);
 }
 
+/* Real(n * conj(n)) */
 long real_conj(int16_t real, int16_t imag)
-/* real(n * conj(n)) */
 {
 	return ((long)real*(long)real + (long)imag*(long)imag);
 }
@@ -627,15 +598,15 @@ void scanner(void)
 			}
 			fix_fft(fft_buf+offset, bin_e);
 
-//            if (!peak_hold) {
-				for (j=0; j<bin_len; j++) {
-					ts->avg[j] += real_conj(fft_buf[offset+j*2], fft_buf[offset+j*2+1]);
-				}
-//            } else {
-//                for (j=0; j<bin_len; j++) {
-//                    ts->avg[j] = MAX(real_conj(fft_buf[offset+j*2], fft_buf[offset+j*2+1]), ts->avg[j]);
-//                }
-//            }
+            if (peak_hold) {
+                for (j=0; j<bin_len; j++) {
+                    ts->avg[j] = MAX(real_conj(fft_buf[offset+j*2], fft_buf[offset+j*2+1]), ts->avg[j]);
+                }
+            } else {
+                for (j=0; j<bin_len; j++) {
+                    ts->avg[j] += real_conj(fft_buf[offset+j*2], fft_buf[offset+j*2+1]);
+                }
+            }
             
 			ts->samples += ds;
 		}
@@ -672,9 +643,10 @@ void csv_dbm(struct tuning_state *ts)
 		dbm  = (double)ts->avg[i];
 		dbm /= (double)ts->rate;
 
-//        if (0 == peak_hold) {
+        if (0 == peak_hold) {
+            // If peak hold is disabled
             dbm /= (double) ts->samples;
-//        }
+        }
 
 		dbm  = 10 * log10(dbm);
 		fprintf(file, "%.2f, ", dbm);
@@ -693,9 +665,7 @@ void csv_dbm(struct tuning_state *ts)
 
 int main(int argc, char **argv)
 {
-#ifndef _WIN32
-	struct sigaction sigact;
-#endif
+    struct sigaction sigact;
 	char *filename = NULL;
 	int i, length, r, opt, wb_mode = 0;
 	int f_set = 0;
@@ -721,7 +691,7 @@ int main(int argc, char **argv)
 	double (*window_fn)(int, int) = rectangle; // 1.0
 	freq_optarg = "";
 
-	while ((opt = getopt(argc, argv, "f:i:s:t:d:g:p:e:c:F:1DOh")) != -1) {
+	while ((opt = getopt(argc, argv, "f:i:s:t:d:g:p:e:c:F:1PDOhn")) != -1) {
 		switch (opt) {
 		case 'f': // lower:upper:bin_size
 			freq_optarg = strdup(optarg);
@@ -758,6 +728,9 @@ int main(int argc, char **argv)
 		case '1':
 			single = 1;
 			break;
+        case 'P':
+            peak_hold = 0;
+            break;
 		case 'D':
 			direct_sampling = 1;
 			break;
@@ -768,6 +741,11 @@ int main(int argc, char **argv)
 			boxcar = 0;
 			comp_fir_size = atoi(optarg);
 			break;
+        case 'n':
+            // Do not use periodic outputs
+            no_interval = 1;
+            break;
+
 		case 'h':
 		default:
 			usage();
@@ -788,7 +766,8 @@ int main(int argc, char **argv)
 	frequency_range(freq_optarg, crop);
 
 	if (tune_count == 0) {
-		usage();}
+		usage();
+    }
 
 	if (argc <= optind) {
 		filename = "-";
@@ -797,13 +776,14 @@ int main(int argc, char **argv)
 	}
 
 	if (interval < 1) {
-		interval = 1;}
+		interval = 1;
+    }
 
-//    if (no_interval) {
-//        fprintf(stderr, "Reporting: directly\n");
-//    } else {
-//        fprintf(stderr, "Reporting every %i seconds\n", interval);
-//    }
+    if (1 == no_interval) {
+        fprintf(stderr, "Reporting: directly\n");
+    } else {
+        fprintf(stderr, "Reporting every %i seconds\n", interval);
+    }
 
 	if (!dev_given) {
 		dev_index = verbose_device_search("0");
@@ -814,21 +794,19 @@ int main(int argc, char **argv)
 	}
 
 	r = rtlsdr_open(&dev, (uint32_t)dev_index);
+    
 	if (r < 0) {
 		fprintf(stderr, "Failed to open rtlsdr device #%d.\n", dev_index);
 		exit(1);
 	}
-#ifndef _WIN32
-	sigact.sa_handler = sighandler;
-	sigemptyset(&sigact.sa_mask);
-	sigact.sa_flags = 0;
-	sigaction(SIGINT, &sigact, NULL);
-	sigaction(SIGTERM, &sigact, NULL);
-	sigaction(SIGQUIT, &sigact, NULL);
-	sigaction(SIGPIPE, &sigact, NULL);
-#else
-	SetConsoleCtrlHandler( (PHANDLER_ROUTINE) sighandler, TRUE );
-#endif
+    
+    sigact.sa_handler = sighandler;
+    sigemptyset(&sigact.sa_mask);
+    sigact.sa_flags = 0;
+    sigaction(SIGINT, &sigact, NULL);
+    sigaction(SIGTERM, &sigact, NULL);
+    sigaction(SIGQUIT, &sigact, NULL);
+    sigaction(SIGPIPE, &sigact, NULL);
 
 	if (direct_sampling) {
         // Bypass SDR tuner module
@@ -851,12 +829,9 @@ int main(int argc, char **argv)
     // Frequency correction (lowercase p flag);
 	verbose_ppm_set(dev, ppm_error);
 
-	if (strcmp(filename, "-") == 0) { /* Write log to stdout */
+	if (strcmp(filename, "-") == 0) {
+        /* Write log to stdout */
 		file = stdout;
-#ifdef _WIN32
-		// Is this necessary?  Output is ascii.
-		_setmode(_fileno(file), _O_BINARY);
-#endif
 	} else {
 		file = fopen(filename, "wb");
 		if (!file) {
@@ -868,58 +843,72 @@ int main(int argc, char **argv)
 	/* Reset endpoint before we start reading from it (mandatory) */
 	verbose_reset_buffer(dev);
 
-	/* actually do stuff */
+	/* Actually do stuff */
 	rtlsdr_set_sample_rate(dev, (uint32_t)tunes[0].rate);
 	sine_table(tunes[0].bin_e);
 	next_tick = time(NULL) + interval;
-	if (exit_time) {
-		exit_time = time(NULL) + exit_time;}
+	
+    if (exit_time) {
+		exit_time = time(NULL) + exit_time;
+    }
+    
 	fft_buf = malloc(tunes[0].buf_len * sizeof(int16_t));
 	length = 1 << tunes[0].bin_e;
 	window_coefs = malloc(length * sizeof(int));
-	for (i=0; i<length; i++) {
+	
+    for (i=0; i<length; i++) {
 		window_coefs[i] = (int)(256*window_fn(i, length));
 	}
+    
 	while (!do_exit) {
 		scanner();
         
 		time_now = time(NULL);
+        if (time_now < next_tick && 0 == no_interval) {
+            continue;
+        }
+        
+        // Get Date, hours, minutes and seconds
         cal_time = localtime(&time_now);
         strftime(t_str, 50, "%Y-%m-%d, %H:%M:%S", cal_time);
 
 		for (i=0; i<tune_count; i++) {
-            // Get milliseconds in the for loop because it changes every loop -> really?
+            // Get milliseconds in the for loop because it changes every loop
             gettimeofday(&tv, NULL);
             millisec = lrint(tv.tv_usec/1000.0);
+            
             // Sometimes it get to a thousand, but the second is not passed yet...
             if (millisec>=1000) {
                 millisec = 999;
                 tv.tv_sec++;
             }
-
+            
             fprintf(file, "%s.%03d, ", t_str, millisec);
-
+            
 			csv_dbm(&tunes[i]);
 		}
 
 		fflush(file);
+        
 		while (time(NULL) >= next_tick) {
-			next_tick += interval;}
-		if (single) {
-			do_exit = 1;}
-		if (exit_time && time(NULL) >= exit_time) {
-			do_exit = 1;}
+			next_tick += interval;
+        }
+		
+        if (single || exit_time && time(NULL) >= exit_time) {
+			do_exit = 1;
+        }
 	}
 
-	/* clean up */
-
+	/* Clean up */
 	if (do_exit) {
-		fprintf(stderr, "\nUser cancel, exiting...\n");}
-	else {
-		fprintf(stderr, "\nLibrary error %d, exiting...\n", r);}
+		fprintf(stderr, "\nUser cancel, exiting...\n");
+    } else {
+		fprintf(stderr, "\nLibrary error %d, exiting...\n", r);
+    }
 
 	if (file != stdout) {
-		fclose(file);}
+		fclose(file);
+    }
 
 	rtlsdr_close(dev);
 	free(fft_buf);
@@ -928,7 +917,7 @@ int main(int argc, char **argv)
 	//	free(tunes[i].avg);
 	//	free(tunes[i].buf8);
 	//}
-	return r >= 0 ? r : -r;
+
+    return r >= 0 ? r : -r;
 }
 
-// vim: tabstop=8:softtabstop=8:shiftwidth=8:noexpandtab
