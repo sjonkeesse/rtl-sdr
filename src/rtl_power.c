@@ -443,7 +443,7 @@ void configure_devices()
 {
     int i, device_count, device_index, r, gain, ppm_error, sample_rate;
     struct tuning_state *ts;
-//    char str_i[2];
+    char str_i[2];
 //    struct rtlsdr_dev_t *device;
 //    static rtlsdr_dev_t *device;
     
@@ -461,8 +461,9 @@ void configure_devices()
         
         for (i = 0; i < tune_count; i++) {
             ts = &tunes[i];
+            sprintf(str_i, "%d", i);
             
-            device_index = verbose_device_search(sprintf("%d", i));
+            device_index = verbose_device_search(str_i);
             r = rtlsdr_open(&ts->device, (uint32_t)device_index);
             
             if (r < 0) {
