@@ -69,7 +69,7 @@ struct tuning_state
 	double crop;
 	uint8_t *buf8;
 	int buf_len;
-    struct rtlsdr_dev_t device; // use static?? or struct?
+    struct rtlsdr_dev_t *device; // use static?? or struct?
 };
 
 /**
@@ -1000,10 +1000,8 @@ int main(int argc, char **argv)
     if (device_per_ts) {
         // Close each device
         for (i = 0; i < tune_count; i++) {
-//            ts = &tunes[i];
-//            ts->device = device;
-            // TODO Use &? -> nee
-            rtlsdr_close(tunes[i]->device);
+            ts = &tunes[i];
+            rtlsdr_close(ts->device);
         }
     } else {
         // Close global device
