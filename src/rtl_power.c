@@ -94,6 +94,8 @@ int no_interval = 0;
 // The use of an interval
 int device_per_ts = 0;
 
+int samples_per_avg = 0;
+
 
 void usage(void)
 {
@@ -650,8 +652,10 @@ void single_scanner(void)
 		ts = &tunes[i];
 		f = (int)rtlsdr_get_center_freq(global_device);
 		if (f != ts->freq) {
+            fprintf(stderr, "Retune!\n");
 			retune(global_device, ts->freq);
         }
+        
 		rtlsdr_read_sync(global_device, ts->buf8, buf_len, &n_read);
         
 		if (n_read != buf_len) {
@@ -746,8 +750,10 @@ void multiple_scanner(void)
         
         f = (int)rtlsdr_get_center_freq(ts->device);
         if (f != ts->freq) {
+            fprintf(stderr, "Retune!\n");
             retune(ts->device, ts->freq);
         }
+        
         rtlsdr_read_sync(ts->device, ts->buf8, buf_len, &n_read);
         
         if (n_read != buf_len) {
@@ -839,7 +845,7 @@ void csv_dbm_info()
     bin_count = (int)((double)len * (1.0 - firstTs->crop));
     bw2 = (int)(((double)firstTs->rate * (double)bin_count) / (len * 2 * ds));
     
-    fprintf(file, "%i, %i, ", firstTs->freq - bw2, lastTs->freq + bw2);
+    fprintf(file, "%i, %i, %.2f, %i, ", firstTs->freq - bw2, lastTs->freq + bw2, (double)firstTs->rate / (double)(len*ds), firstTs->samples * tune_count);
 }
 
 void csv_dbm_data(struct tuning_state *ts)
@@ -949,7 +955,7 @@ int main(int argc, char **argv)
 	int f_set = 0;
 	int gain = AUTO_GAIN; // tenths of a dB
 	int ppm_error = 0;
-	int interval = 10;
+	int interval = 1;
 	int fft_threads = 1;
 	int smoothing = 0;
 	int single = 0;
@@ -965,16 +971,20 @@ int main(int argc, char **argv)
 	struct tm *cal_time;
 	double (*window_fn)(int, int) = rectangle; // 1.0
 	freq_optarg = "";
+    int sample_count = 0;
 
-	while ((opt = getopt(argc, argv, "f:i:s:t:g:p:e:c:F:1PDhn")) != -1) {
+    while ((opt = getopt(argc, argv, "f:i:s:S:t:g:p:e:c:F:1PDhn")) != -1) {
 		switch (opt) {
 		case 'f': // lower:upper:bin_size
 			freq_optarg = strdup(optarg);
 			f_set = 1;
 			break;
-		case 'g':
-			gain = (int)(atof(optarg) * 10);
-			break;
+        case 'g':
+            gain = (int)(atof(optarg) * 10);
+            break;
+        case 'S':
+            samples_per_avg = (int)(atof(optarg));
+            break;
 		case 'c':
 			crop = atofp(optarg);
 			break;
@@ -1097,8 +1107,21 @@ int main(int argc, char **argv)
         }
         
 		time_now = time(NULL);
-        if (time_now < next_tick && 0 == no_interval) {
-            continue;
+        
+        if (0 < samples_per_avg) {
+            // Use sample count by this, not by time
+            
+            if (sample_count < samples_per_avg) {
+                sample_count++;
+                continue;
+            } else {
+                sample_count = 0;
+            }
+        } else {
+            // Using time
+            if (time_now < next_tick && 0 == no_interval) {
+                continue;
+            }
         }
         
         // Get Date, hours, minutes and seconds
