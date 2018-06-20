@@ -292,7 +292,7 @@ double rectangle(int i, int length)
 }
 
 /**
- * For bins between 1MHz and 2MHz
+ * For bins between 1MHz and 2MHz?
  */
 void rms_power(struct tuning_state *ts)
 {
@@ -361,22 +361,24 @@ void frequency_range(char *arg, double crop)
     
 	/* evenly sized ranges, as close to MAXIMUM_RATE as possible */
 	// todo, replace loop with algebra
-	for (i=1; i<1500; i++) {
-		bw_seen = (upper - lower) / i;
-		bw_used = (int)((double)(bw_seen) / (1.0 - crop));
-		if (bw_used > MAXIMUM_RATE) {
-			continue;}
-		tune_count = i;
-		break;
-	}
+    for (i=1; i<1500; i++) {
+        bw_seen = (upper - lower) / i;
+        bw_used = (int)((double)(bw_seen) / (1.0 - crop)); // crop = 0.0
+        if (bw_used > MAXIMUM_RATE) {
+            continue;}
+        tune_count = i;
+        break;
+    }
     
 	/* unless small bandwidth */
+    /* Only if bandwidth is smaller than 1 MHz */
 	if (bw_used < MINIMUM_RATE) {
 		tune_count = 1;
 		downsample = MAXIMUM_RATE / bw_used;
 		bw_used = bw_used * downsample;
 	}
 	
+    // Boxcar is on by default
     if (!boxcar && downsample > 1) {
 		downsample_passes = (int)log2(downsample);
 		downsample = 1 << downsample_passes;
@@ -388,11 +390,16 @@ void frequency_range(char *arg, double crop)
 	for (i=1; i<=21; i++) {
 		bin_e = i;
 		bin_size = (double)bw_used / (double)((1<<i) * downsample);
+        
+        // Max size is downsample e.g. 1000 (1k)
 		if (bin_size <= (double)max_size) {
-			break;}
+			break;
+        }
 	}
     
 	/* unless giant bins */
+    // 1000 >= 1000000
+    // By defaut NO
 	if (max_size >= MINIMUM_RATE) {
 		bw_seen = max_size;
 		bw_used = max_size;
@@ -664,6 +671,7 @@ void single_scanner(void)
 		
         /* rms */
 		if (bin_len == 1) {
+            fprintf(stderr, "rms\n");
 			rms_power(ts);
 			continue;
 		}
@@ -677,6 +685,7 @@ void single_scanner(void)
 		ds_p = ts->downsample_passes;
 		
         if (boxcar && ds > 1) {
+            fprintf(stderr, "1.\n");
 			j=2, j2=0;
 			while (j < buf_len) {
 				fft_buf[j2]   += fft_buf[j];
@@ -688,6 +697,7 @@ void single_scanner(void)
 					j2 += 2;}
 			}
 		} else if (ds_p) {
+            fprintf(stderr, "2\n");
             /* recursive */
 			for (j=0; j < ds_p; j++) {
 				downsample_iq(fft_buf, buf_len >> j);
@@ -762,6 +772,7 @@ void multiple_scanner(void)
         
         /* rms */
         if (bin_len == 1) {
+            fprintf(stderr, "rms\n");
             rms_power(ts);
             continue;
         }
@@ -775,6 +786,7 @@ void multiple_scanner(void)
         ds_p = ts->downsample_passes;
         
         if (boxcar && ds > 1) {
+            fprintf(stderr, "1\n");
             j=2, j2=0;
             while (j < buf_len) {
                 fft_buf[j2]   += fft_buf[j];
@@ -786,6 +798,7 @@ void multiple_scanner(void)
                     j2 += 2;}
             }
         } else if (ds_p) {
+            fprintf(stderr, "2\n");
             /* recursive */
             for (j=0; j < ds_p; j++) {
                 downsample_iq(fft_buf, buf_len >> j);
@@ -867,9 +880,14 @@ void csv_dbm_data(struct tuning_state *ts)
         }
     }
     
+    
+    fprintf(stderr, "crop %f.\n", ts->crop);
+    
     // something seems off with the dbm math
     i1 = 0 + (int)((double)len * ts->crop * 0.5);
     i2 = (len-1) - (int)((double)len * ts->crop * 0.5);
+    
+    fprintf(stderr, "i1 %i, i2 %i\n", i1, i2);
     
     for (i=i1; i<=i2; i++) {
         dbm  = (double)ts->avg[i];
@@ -1094,6 +1112,11 @@ int main(int argc, char **argv)
 	fft_buf = malloc(tunes[0].buf_len * sizeof(int16_t));
 	length = 1 << tunes[0].bin_e;
 	window_coefs = malloc(length * sizeof(int));
+    
+    
+    fprintf(stderr, "tunes[0].buf_len %i\n", tunes[0].buf_len);
+    fprintf(stderr, "sum %i\n", tunes[0].buf_len * sizeof(int16_t));
+    
 	
     for (i=0; i<length; i++) {
 		window_coefs[i] = (int)(256*window_fn(i, length));
